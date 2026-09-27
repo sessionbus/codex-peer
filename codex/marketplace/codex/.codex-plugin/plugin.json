@@ -5,8 +5,8 @@
   "author": {
     "name": "Sessionbus"
   },
-  "homepage": "https://github.com/antst/sessionbus",
-  "repository": "https://github.com/antst/sessionbus-peers",
+  "homepage": "https://github.com/sessionbus/sessionbus",
+  "repository": "https://github.com/sessionbus/codex-peer",
   "license": "MIT",
   "keywords": ["sessionbus", "messaging", "codex"],
   "skills": "./skills/",
