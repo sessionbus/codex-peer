@@ -88,7 +88,7 @@ func TestCodexActualWorkerSeedReceiptTerminalAndCollection(t *testing.T) {
 			}
 			hello := next()
 			send(protocol.ResultBytes(hello.ID, "session.hello", struct{}{}))
-			send(protocol.RequestBytes(1, "session.open", kit.OpenRequest{Name: "seed@local", Groups: []string{}, Policy: &kit.LanePolicy{IdleMessage: "run"}}))
+			send(protocol.RequestBytes(1, "session.open", kit.OpenRequest{Name: "seed@local", Groups: []string{}, Policy: &kit.LanePolicy{}}))
 			if opened := next(); opened.Error != nil {
 				t.Fatal(opened)
 			}
