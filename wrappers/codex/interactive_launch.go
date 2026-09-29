@@ -42,7 +42,7 @@ func nativeCodexPath() (string, error) {
 	}
 	return "", errors.New("native codex executable was not found on PATH")
 }
-func brokerEnvironment(env []string, endpoint string) []string {
+func cleanInteractiveEnvironment(env []string) []string {
 	result := make([]string, 0, len(env)+1)
 	for _, value := range env {
 		name, _, _ := strings.Cut(value, "=")
@@ -51,9 +51,13 @@ func brokerEnvironment(env []string, endpoint string) []string {
 		}
 		result = append(result, value)
 	}
+	return result
+}
+
+func brokerEnvironment(env []string, endpoint string) []string {
 	// Native MCP receives only its explicitly allowlisted endpoint; identity and
 	// launch groups live in the owning broker, never ambient inherited IDs.
-	return append(result, EndpointEnv+"="+endpoint)
+	return append(cleanInteractiveEnvironment(env), EndpointEnv+"="+endpoint)
 }
 
 // LaunchInteractive starts the direct child broker, then replaces this process
@@ -61,6 +65,13 @@ func brokerEnvironment(env []string, endpoint string) []string {
 func LaunchInteractive(ctx context.Context, args []string) error {
 	if os.Getenv("SESSIONBUS_LAUNCH_TOKEN") != "" {
 		return errors.New("interactive launcher cannot consume a lane token")
+	}
+	if len(args) == 1 && args[0] == "--version" {
+		native, err := nativeCodexPath()
+		if err != nil {
+			return err
+		}
+		return syscall.Exec(native, []string{native, "--version"}, cleanInteractiveEnvironment(os.Environ()))
 	}
 	options, err := parseInteractiveOptions(args)
 	if err != nil {
