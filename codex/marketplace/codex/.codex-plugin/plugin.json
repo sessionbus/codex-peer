@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.5.3-codex.0",
+  "version": "0.5.9-codex.0",
   "description": "Sessionbus peers and lanes through native Codex tools.",
   "author": {
     "name": "Sessionbus"
