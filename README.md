@@ -66,7 +66,7 @@ home. The package records its source in SOURCE.txt. `codex-peer --version` and
 
 The stable tag, RELEASE_VERSION and Codex plugin base version must agree.
 CI retains Linux/macOS tests, lint, workflow checks and four-platform packaging.
-Release publication remains disabled while separation is under verification.
+Stable releases are published from signed `vX.Y.Z` tags; see [docs/releases](docs/releases).
 
 Shared host/MCP/version support comes from
 [`peer-common`](https://github.com/sessionbus/peer-common) at the exact version
@@ -130,19 +130,20 @@ TUI-only where the native remote protocol does not project them.
 [prior installed acceptance](docs/designs/codex-0.5.0/ACCEPTANCE.md), and
 [mandatory wake boundaries](docs/designs/mandatory-message-wake-20260921/NATIVE-BOUNDARIES.md)
 retain historical evidence and limitations. Earlier stage-only observations do
-not override the current mandatory-wake contract. Legacy installer/cleanup
+not override the current mandatory-wake contract. Legacy cleanup
 fixtures are retained as historical compatibility tools, not the current install route.
 
 ## Links published before the split
 
-The original `antst/sessionbus-peers` repository redirects here, retaining its
-history, issues and combined release assets. Older `scripts/install-<product>.sh`
-URLs remain compatibility entrypoints. For products other than Codex their
-default (and `latest`) is pinned to the final combined stable release **v0.5.3**;
-they print the destination repository for future upgrades. Explicit historical
-versions and download mirrors remain supported. These scripts do not package
-other products into Codex.
+The original `antst/sessionbus-peers` repository redirects here and retains its
+history, issues and combined release assets (v0.5.0–v0.5.3 and `development`),
+which remain available for explicit manual download. Its per-product
+`scripts/install-<product>.sh` entrypoints are retired: the combined v0.5.3 peers
+are incompatible with Sessionbus v0.5.8 and later. Install each product from its
+own repository:
 
-Use the product repositories linked above for new releases. Release publication
-is still held during migration; the inherited combined `development` assets and
-checksums must remain intact until their compatibility users have migrated.
+- Claude: [claude-peer `scripts/install-claude.sh`](https://github.com/sessionbus/claude-peer/blob/main/scripts/install-claude.sh)
+- Grok: [grok-peer `scripts/install-grok.sh`](https://github.com/sessionbus/grok-peer/blob/main/scripts/install-grok.sh)
+- Qwen: [qwen-peer `scripts/install-qwen.sh`](https://github.com/sessionbus/qwen-peer/blob/main/scripts/install-qwen.sh)
+- OpenCode and Kilo: [opencode-kilo `scripts/install-opencode.sh`](https://github.com/sessionbus/opencode-kilo/blob/main/scripts/install-opencode.sh), [`scripts/install-kilo.sh`](https://github.com/sessionbus/opencode-kilo/blob/main/scripts/install-kilo.sh)
+- Pi and OMP: [pi-omp `scripts/install-pi.sh`](https://github.com/sessionbus/pi-omp/blob/main/scripts/install-pi.sh), [`scripts/install-omp.sh`](https://github.com/sessionbus/pi-omp/blob/main/scripts/install-omp.sh)

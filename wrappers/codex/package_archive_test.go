@@ -54,7 +54,7 @@ func TestCodexArchiveContainsOneArtifactAndOneGenericSkill(t *testing.T) {
 			regular = append(regular, h.Name)
 			if h.Name == "marketplace/codex/.codex-plugin/plugin.json" {
 				var m struct{ Name, Version string }
-				if json.NewDecoder(reader).Decode(&m) != nil || m.Name != "codex" || !strings.HasPrefix(m.Version, "0.5.3-codex.g") {
+				if json.NewDecoder(reader).Decode(&m) != nil || m.Name != "codex" || !strings.HasPrefix(m.Version, "0.5.9-codex.g") {
 					t.Fatalf("manifest=%+v", m)
 				}
 			} else if h.Name == "SOURCE.txt" {
