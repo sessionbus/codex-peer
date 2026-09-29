@@ -51,8 +51,8 @@ func TestInstalledPublicEntryAndPrivateBrokerSignal(t *testing.T) {
 		t.Fatalf("production entry: %v %s", e, b)
 	}
 	source := `package main
-import("os";"io";"encoding/json";"path/filepath";"fmt")
-func main(){server:=len(os.Args)>1&&os.Args[1]=="app-server";name:="tui.json";if server{name="server.json"};b,_:=json.Marshal(map[string]any{"pid":os.Getpid(),"argv":os.Args[1:]});if e:=os.WriteFile(filepath.Join(os.Getenv("ENTRY_CAPTURE"),name),b,0600);e!=nil{panic(e)};if server{_,_=io.Copy(io.Discard,os.Stdin);fmt.Fprintln(os.Stderr,"NATIVE_EOF_JOINED");return};os.Exit(37)}`
+import("os";"io";"encoding/json";"path/filepath";"fmt";"strings")
+func main(){server:=len(os.Args)>1&&os.Args[1]=="app-server";name:="tui.json";if server{name="server.json"};names:=[]string{};for _,v:=range os.Environ(){n,_,_:=strings.Cut(v,"=");names=append(names,n)};dirs,_:=filepath.Glob(filepath.Join(os.Getenv("TMPDIR"),"sessionbus-codex-launch-*"));b,_:=json.Marshal(map[string]any{"pid":os.Getpid(),"argv":os.Args[1:],"env":names,"launchDirs":dirs});if e:=os.WriteFile(filepath.Join(os.Getenv("ENTRY_CAPTURE"),name),b,0600);e!=nil{panic(e)};if server{_,_=io.Copy(io.Discard,os.Stdin);fmt.Fprintln(os.Stderr,"NATIVE_EOF_JOINED");return};os.Exit(37)}`
 	if err = os.WriteFile(filepath.Join(root, "native.go"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +70,45 @@ func main(){server:=len(os.Args)>1&&os.Args[1]=="app-server";name:="tui.json";if
 	}
 	t.Setenv("PATH", nativeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ENTRY_CAPTURE", root)
+	t.Run("public-native-version-direct-exec", func(t *testing.T) {
+		cmd := exec.Command(public, "--native-version")
+		cmd.Env = append(os.Environ(), "SESSIONBUS_TEST_SENTINEL=value", "SESSIONBUS_SOCKET=/ambient")
+		b, e := cmd.CombinedOutput()
+		var exit *exec.ExitError
+		if !errors.As(e, &exit) || exit.ExitCode() != 37 {
+			t.Fatalf("native status: %v %s", e, b)
+		}
+		var v struct {
+			PID        int
+			Argv       []string
+			Env        []string
+			LaunchDirs []string
+		}
+		raw, e := os.ReadFile(filepath.Join(root, "tui.json"))
+		if e != nil || json.Unmarshal(raw, &v) != nil {
+			t.Fatal(e, string(raw))
+		}
+		if v.PID != cmd.ProcessState.Pid() {
+			t.Fatal("launcher retained a parent", v.PID, cmd.ProcessState.Pid())
+		}
+		if !reflect.DeepEqual(v.Argv, []string{"--version"}) {
+			t.Fatal(v.Argv)
+		}
+		for _, name := range v.Env {
+			if strings.HasPrefix(name, "SESSIONBUS_") {
+				t.Fatal("native inherited Sessionbus environment", name)
+			}
+		}
+		if len(v.LaunchDirs) != 0 {
+			t.Fatal("native observed launch directories", v.LaunchDirs)
+		}
+		if _, e = os.Stat(filepath.Join(root, "server.json")); !os.IsNotExist(e) {
+			t.Fatal("App Server capture exists", e)
+		}
+		if matches, e := filepath.Glob(filepath.Join(root, "sessionbus-codex-launch-*")); e != nil || len(matches) != 0 {
+			t.Fatal("launch directory exists", matches, e)
+		}
+	})
 	t.Run("public-exec-native-argv", func(t *testing.T) {
 		cmd := exec.Command(public, "--resume", "native selector", "-g", "one", "--unknown-native", "literal value", "--group=two,three", "--yolo", "-c", "model=literal", "--model", "--resume", "-m", "--yolo", "--", "--group", "operand")
 		b, e := cmd.CombinedOutput()
