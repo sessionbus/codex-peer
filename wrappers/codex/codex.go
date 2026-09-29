@@ -128,6 +128,9 @@ func (p *Wrapper) Open(ctx context.Context, request sessionkit.OpenRequest) (res
 		}
 	}()
 	nativeCtx := p.ctx
+	if err = validateLaneTypedArguments(request.Open.Arguments, request.Open.Model, request.Open.ReasoningEffort); err != nil {
+		return sessionkit.OpenResult{}, err
+	}
 	arguments, nativeBypass, err := laneArguments(request.Open.Arguments)
 	if err != nil {
 		return sessionkit.OpenResult{}, err
