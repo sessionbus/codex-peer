@@ -29,6 +29,35 @@ func processArguments(arguments []string) ([]string, error) {
 	return append([]string(nil), arguments...), nil
 }
 
+// validateLaneTypedArguments prevents a raw native setting from competing with
+// the corresponding typed App Server field. Untyped native arguments remain
+// native-owned, and operands after -- are always literal.
+func validateLaneTypedArguments(arguments []string, model, reasoningEffort string) error {
+	for index := 0; index < len(arguments); index++ {
+		argument := arguments[index]
+		if argument == "--" {
+			return nil
+		}
+		if value, found := codexConfigValue(arguments, &index); found {
+			path, _, ok := codexConfigAssignment(value)
+			if !ok {
+				continue
+			}
+			if model != "" && slices.Equal(path, []string{"model"}) {
+				return errors.New("argument conflicts with typed field model")
+			}
+			if reasoningEffort != "" && slices.Equal(path, []string{"model_reasoning_effort"}) {
+				return errors.New("argument conflicts with typed field reasoning_effort")
+			}
+			continue
+		}
+		if model != "" && (argument == "-m" || argument == "--model" || strings.HasPrefix(argument, "--model=")) {
+			return errors.New("argument conflicts with typed field model")
+		}
+	}
+	return nil
+}
+
 // laneArguments consumes the TUI-only bypass spelling before starting App
 // Server. Earlier lane dispatch canonicalized this flag to permission_mode;
 // App Server instead accepts the equivalent policy through thread and turn
@@ -78,18 +107,8 @@ func validateManagedConfig(arguments []string) error {
 		if argument == "--" {
 			return nil
 		}
-		value, found := "", false
+		value, found := codexConfigValue(arguments, &index)
 		switch {
-		case argument == "-c" || argument == "--config":
-			if index+1 < len(arguments) && arguments[index+1] != "--" && !strings.HasPrefix(arguments[index+1], "-") {
-				index++
-				value, found = arguments[index], true
-			}
-		case strings.HasPrefix(argument, "--config="):
-			value, found = strings.TrimPrefix(argument, "--config="), true
-		case strings.HasPrefix(argument, "-c") && len(argument) > len("-c"):
-			value, found = strings.TrimPrefix(argument, "-c"), true
-			value = strings.TrimPrefix(value, "=")
 		case argument == "--disable":
 			if index+1 < len(arguments) && arguments[index+1] != "--" {
 				index++
@@ -119,6 +138,25 @@ func validateManagedConfig(arguments []string) error {
 		}
 	}
 	return nil
+}
+
+// codexConfigValue recognizes the exact config spellings already accepted by
+// the wrapper. It advances index when a separate value is consumed.
+func codexConfigValue(arguments []string, index *int) (string, bool) {
+	argument := arguments[*index]
+	switch {
+	case argument == "-c" || argument == "--config":
+		if *index+1 < len(arguments) && arguments[*index+1] != "--" && !strings.HasPrefix(arguments[*index+1], "-") {
+			(*index)++
+			return arguments[*index], true
+		}
+	case strings.HasPrefix(argument, "--config="):
+		return strings.TrimPrefix(argument, "--config="), true
+	case strings.HasPrefix(argument, "-c") && len(argument) > len("-c"):
+		value := strings.TrimPrefix(argument, "-c")
+		return strings.TrimPrefix(value, "="), true
+	}
+	return "", false
 }
 
 func pathPrefix(path, target []string) bool {

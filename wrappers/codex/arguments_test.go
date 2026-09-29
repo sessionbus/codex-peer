@@ -194,6 +194,52 @@ func TestLaneBypassPreservesValuesAndBoundary(t *testing.T) {
 	}
 }
 
+func TestLaneTypedArgumentConflicts(t *testing.T) {
+	for _, test := range []struct {
+		name, model, effort, want string
+		arguments                 []string
+	}{
+		{name: "short model", model: "typed", arguments: []string{"-m", "native"}, want: "model"},
+		{name: "long model", model: "typed", arguments: []string{"--model", "native"}, want: "model"},
+		{name: "attached model", model: "typed", arguments: []string{"--model=native"}, want: "model"},
+		{name: "short config model", model: "typed", arguments: []string{"-c", `model="native"`}, want: "model"},
+		{name: "long config model", model: "typed", arguments: []string{"--config", `model="native"`}, want: "model"},
+		{name: "attached long config model", model: "typed", arguments: []string{`--config=model="native"`}, want: "model"},
+		{name: "attached short config model", model: "typed", arguments: []string{`-cmodel="native"`}, want: "model"},
+		{name: "equals short config model", model: "typed", arguments: []string{`-c=model="native"`}, want: "model"},
+		{name: "short config effort", effort: "low", arguments: []string{"-c", `model_reasoning_effort="high"`}, want: "reasoning_effort"},
+		{name: "long config effort", effort: "low", arguments: []string{"--config", `model_reasoning_effort="high"`}, want: "reasoning_effort"},
+		{name: "attached long config effort", effort: "low", arguments: []string{`--config=model_reasoning_effort="high"`}, want: "reasoning_effort"},
+		{name: "attached short config effort", effort: "low", arguments: []string{`-cmodel_reasoning_effort="high"`}, want: "reasoning_effort"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateLaneTypedArguments(test.arguments, test.model, test.effort)
+			if err == nil || err.Error() != "argument conflicts with typed field "+test.want {
+				t.Fatalf("validateLaneTypedArguments(%q) error = %v", test.arguments, err)
+			}
+		})
+	}
+}
+
+func TestLaneTypedArgumentConflictBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name, model, effort string
+		arguments           []string
+	}{
+		{name: "untyped model passthrough", arguments: []string{"--model", "native", "-c", `model="caller"`}},
+		{name: "untyped effort passthrough", arguments: []string{"-c", `model_reasoning_effort="high"`}},
+		{name: "post boundary model", model: "typed", effort: "low", arguments: []string{"--", "--model", "native", "-c", `model_reasoning_effort="high"`}},
+		{name: "different config paths", model: "typed", effort: "low", arguments: []string{"-c", `model_provider="native"`, "--config", `model_reasoning_effort_extra="high"`}},
+		{name: "literal quoted key", model: "typed", arguments: []string{"-c", `"model"="native"`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateLaneTypedArguments(test.arguments, test.model, test.effort); err != nil {
+				t.Fatalf("validateLaneTypedArguments(%q) error = %v", test.arguments, err)
+			}
+		})
+	}
+}
+
 func TestPermissionAndName(t *testing.T) {
 	for _, test := range []struct {
 		input, approval, sandbox, failure string
