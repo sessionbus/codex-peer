@@ -2,7 +2,9 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +187,71 @@ func TestBrokerDeliveriesKeepTheirOrder(t *testing.T) {
 		t.Fatalf("second input: %q", text)
 	}
 	answerNative(t, native, steer, map[string]string{"turnId": "turn-1"})
+}
+
+// Messages that arrive together are queued in the order they were received,
+// whatever order their receipts are written in. All frames are sent in one
+// write and no receipt is awaited between them.
+func TestBrokerDeliveriesKeepArrivalOrderInABurst(t *testing.T) {
+	_, _, native, bus := deliveryFixture(t)
+	const burst = 16
+	var frames bytes.Buffer
+	for i := 0; i < burst; i++ {
+		body := fmt.Sprintf("BURST-%02d-BODY", i)
+		request := kit.DeliveryRequest{MessageID: "m" + body, From: kit.DeliverySource{SessionID: "source@local", Product: "fixture", Groups: []string{"launch"}}, Body: body}
+		if err := json.NewEncoder(&frames).Encode(frame("message.deliver", 2+i, request)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sent := make(chan error, 1)
+	go func() { _, err := bus.Conn.Write(frames.Bytes()); sent <- err }()
+	receipts := make(chan string, burst)
+	go func() {
+		for i := 0; i < burst; i++ {
+			var receipt brokerFrame
+			if err := bus.Read(&receipt); err != nil {
+				receipts <- err.Error()
+				return
+			}
+			receipts <- string(receipt["result"])
+		}
+	}()
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < burst; i++ {
+		select {
+		case receipt := <-receipts:
+			if receipt != `{"disposition":"written"}` {
+				t.Fatalf("receipt %d of the burst: %s", i, receipt)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("receipt %d of the burst did not arrive", i)
+		}
+	}
+	// Every message is queued before the native is answered once, so the order
+	// the native sees is the order of admission.
+	var got []string
+	for i := 0; i < burst; i++ {
+		var text string
+		if i == 0 {
+			text = expectStart(t, native, "turn-1")
+		} else {
+			steer := expectSteer(t, native, "turn-1")
+			text = inputText(t, steer)
+			answerNative(t, native, steer, map[string]string{"turnId": "turn-1"})
+		}
+		at := strings.Index(text, "BURST-")
+		if at < 0 || len(text) < at+len("BURST-00-BODY") {
+			t.Fatalf("native input %d carries no burst message: %q", i, text)
+		}
+		got = append(got, text[at:at+len("BURST-00-BODY")])
+	}
+	for i, body := range got {
+		if body != fmt.Sprintf("BURST-%02d-BODY", i) {
+			t.Fatalf("the native received the burst out of arrival order: %v", got)
+		}
+	}
 }
 
 // This test does not depend on when the receipt arrives, so on the previous

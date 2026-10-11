@@ -166,11 +166,13 @@ those absence checkpoints.
 A message to an interactive thread is acknowledged with `written` as soon as the
 broker holds it. That receipt does not mean native Codex has taken it. The broker
 then hands messages to the native in arrival order: it steers the turn in
-progress, or starts a turn when the thread is idle. A message the native did not
-accept as a steer, for example because the turn had just ended or a compaction
-was running, is kept and starts the next turn. A handoff whose outcome is unknown
-is not repeated. The queue is in memory only: at most 64 messages or 1 MiB per
-thread and 16 MiB per broker, beyond which a message is rejected with
+progress, or starts a turn when the thread is idle. A steer that the native
+refuses as an invalid request, for example because the turn had just ended or a
+compaction was running, is kept and handed over again on the next message or
+change of the thread's turn state. A steer or turn start that was sent to the
+native and failed in any other way, or whose outcome is unknown, is not
+repeated. The queue is in memory only: at most 64 messages or 1 MiB per thread
+and 16 MiB per broker, beyond which a message is rejected with
 `Sessionbus unsent input limit reached`. It ends with the thread's bus presence.
 
 Native `-c`/`--config` occurrences are mirrored to App Server in order and kept

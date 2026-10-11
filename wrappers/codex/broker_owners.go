@@ -31,11 +31,12 @@ const (
 	brokerDeliveryFull     = "Sessionbus unsent input limit reached"
 )
 
-// brokerDiagnostics receives, once when the broker ends, one line per kind of
+// brokerDiagnostics receives, once at broker shutdown, one line per kind of
 // delivery that was dropped after an uncertain native handoff: the native
 // method, the outcome class and a count, never native error text or message
-// content. The broker shares its stderr with the native TUI's terminal, so
-// nothing is written while the TUI runs.
+// content. The broker shares its stderr with the native TUI's terminal, so the
+// lines are held until shutdown instead of being written as deliveries drop.
+// Shutdown can precede the TUI's exit when the native connection fails.
 var brokerDiagnostics io.Writer = os.Stderr
 
 type brokerOwners struct {
@@ -450,6 +451,15 @@ func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
 	}
 	r.handlers.Add(1)
 	r.mu.Unlock()
+	// The SDK runs this handler in frame order on its reader, so the message is
+	// queued here, before the next frame is read: received messages keep their
+	// arrival order. Only the receipt write, which can block, leaves the reader.
+	var receipt kit.DeliveryReceipt
+	var deliveryErr error
+	p, delivery := request.Params.(*protocol.DeliveryRequest)
+	if delivery && admitted && request.Method == "message.deliver" {
+		receipt, deliveryErr = r.accept(*p)
+	}
 	go func() {
 		defer r.handlers.Done()
 		var err error
@@ -457,15 +467,12 @@ func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
 			err = c.Error(request, -32600, nil)
 		} else if !admitted {
 			err = c.Result(request, kit.DeliveryReceipt{Disposition: "rejected", Reason: "unpublished_before_submission"})
-		} else if p, ok := request.Params.(*protocol.DeliveryRequest); ok {
-			receipt, deliveryErr := r.accept(*p)
-			if deliveryErr != nil {
-				err = c.Error(request, -32603, "uncertain_native_admission")
-			} else {
-				err = c.Result(request, receipt)
-			}
-		} else {
+		} else if !delivery {
 			err = errors.New("invalid delivery request")
+		} else if deliveryErr != nil {
+			err = c.Error(request, -32603, "uncertain_native_admission")
+		} else {
+			err = c.Result(request, receipt)
 		}
 		if err != nil {
 			_ = c.Close()

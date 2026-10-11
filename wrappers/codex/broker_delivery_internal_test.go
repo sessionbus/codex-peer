@@ -94,30 +94,77 @@ func TestBrokerDeliveryOutcomeAfterATextCall(t *testing.T) {
 	}
 }
 
-// A request that fails before it is queued to the native was never attempted:
-// the message is kept and delivered exactly once when the limit has cleared.
+// A request carrying the text that fails before it is queued to the native was
+// never attempted: the message is kept and delivered exactly once when the
+// limit has cleared. The route limit is made to refuse the turn/steer or
+// turn/start itself, after the thread read (and turn list) have succeeded.
 func TestBrokerDeliveryKeptWhenTheNativeRequestWasNotAdmitted(t *testing.T) {
-	_, m, native, bus := deliveryFixture(t)
-	m.mu.Lock()
-	for i := 0; i < brokerRouteLimit; i++ {
-		m.calls["filler"+string(rune('a'+i%26))+strings.Repeat("x", i/26)] = &brokerCall{}
-	}
-	m.mu.Unlock()
-	sendDelivery(t, bus, 2, "LIMIT-BODY")
-	expectWritten(t, bus, 2)
-	m.mu.Lock()
-	m.calls = map[string]*brokerCall{}
-	m.mu.Unlock()
-	nativeEvent(t, native, m, "turn/started", map[string]any{"threadId": "one", "turn": map[string]string{"id": "turn-1"}})
-	steer := expectSteer(t, native, "turn-1")
-	if text := inputText(t, steer); !strings.Contains(text, "LIMIT-BODY") {
-		t.Fatalf("kept input: %q", text)
-	}
-	answerNative(t, native, steer, map[string]string{"turnId": "turn-1"})
-	sendDelivery(t, bus, 3, "NEXT-BODY")
-	expectWritten(t, bus, 3)
-	if text := expectStart(t, native, "turn-2"); !strings.Contains(text, "NEXT-BODY") || strings.Contains(text, "LIMIT-BODY") {
-		t.Fatalf("after the kept message: %q", text)
+	for _, tc := range []struct{ name, status, method string }{
+		{"steer", "active", "turn/steer"},
+		{"start", "idle", "turn/start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, m, native, bus := deliveryFixture(t)
+			r := residentOf(o)
+			sendDelivery(t, bus, 2, "LIMIT-BODY")
+			expectWritten(t, bus, 2)
+			// The attempt is now waiting for its last request before the text. A wake
+			// stored during the attempt can only be consumed once the attempt has ended.
+			last := expectNative(t, native, "thread/read")
+			if tc.status == "active" {
+				answerNative(t, native, last, map[string]any{"thread": map[string]any{"id": "one", "status": map[string]string{"type": "active"}}})
+				last = expectNative(t, native, "thread/turns/list")
+			}
+			r.wakeDelivery()
+			if len(r.deliveryWake) != 1 {
+				t.Fatal("the wake was not stored during the attempt")
+			}
+			m.mu.Lock()
+			for i := 0; i < brokerRouteLimit; i++ {
+				m.calls["filler"+string(rune('a'+i%26))+strings.Repeat("x", i/26)] = &brokerCall{}
+			}
+			m.mu.Unlock()
+			if tc.status == "active" {
+				answerNative(t, native, last, map[string]any{"data": []map[string]string{{"id": "turn-1", "status": "inProgress"}}})
+			} else {
+				answerNative(t, native, last, map[string]any{"thread": map[string]any{"id": "one", "status": map[string]string{"type": "idle"}}})
+			}
+			// With the limit still full, the stored wake is consumed: the attempt ended,
+			// and its text request was refused before it was queued (were it queued, it
+			// would be the next native frame below, and it is not).
+			eventually(t, "the refused attempt to end", func() bool { return len(r.deliveryWake) == 0 })
+			r.mu.Lock()
+			queued := len(r.queue)
+			r.mu.Unlock()
+			if queued != 1 || held(o) == 0 {
+				t.Fatalf("after the request limit refused %s: %d queued, %d bytes held", tc.method, queued, held(o))
+			}
+			m.mu.Lock()
+			m.calls = map[string]*brokerCall{}
+			m.mu.Unlock()
+			// One wake. (The attempt started by the stored wake may also still be at its
+			// thread read; either way the native sees one complete handoff of the text.)
+			nativeEvent(t, native, m, "turn/started", map[string]any{"threadId": "one", "turn": map[string]string{"id": "turn-1"}})
+			var text string
+			if tc.status == "active" {
+				steer := expectSteer(t, native, "turn-1")
+				text = inputText(t, steer)
+				answerNative(t, native, steer, map[string]string{"turnId": "turn-1"})
+			} else {
+				text = expectStart(t, native, "turn-1")
+			}
+			if !strings.Contains(text, "LIMIT-BODY") {
+				t.Fatalf("kept input: %q", text)
+			}
+			eventually(t, "the kept message to leave the queue", func() bool { return held(o) == 0 })
+			sendDelivery(t, bus, 3, "NEXT-BODY")
+			expectWritten(t, bus, 3)
+			steer := expectSteer(t, native, "turn-1")
+			if text := inputText(t, steer); !strings.Contains(text, "NEXT-BODY") || strings.Contains(text, "LIMIT-BODY") {
+				t.Fatalf("after the kept message: %q", text)
+			}
+			answerNative(t, native, steer, map[string]string{"turnId": "turn-1"})
+		})
 	}
 }
 
