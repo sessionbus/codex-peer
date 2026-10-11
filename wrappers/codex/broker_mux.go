@@ -138,7 +138,24 @@ func (m *brokerMux) enqueue(q chan brokerPacket, f brokerFrame) error {
 		return errors.New("App Server outbound queue is full")
 	}
 }
+
+// errBrokerNotAdmitted marks a call that ended before its own request frame
+// was admitted to the native outbound queue: that request never reached the
+// native. It is call-local. A failure shared with other calls through fail is
+// never tagged, so an admitted call cannot read as not admitted.
+var errBrokerNotAdmitted = errors.New("App Server request was not admitted")
+
+type brokerNotAdmitted struct{ cause error }
+
+func (e *brokerNotAdmitted) Error() string        { return e.cause.Error() }
+func (e *brokerNotAdmitted) Unwrap() error        { return e.cause }
+func (e *brokerNotAdmitted) Is(target error) bool { return target == errBrokerNotAdmitted }
+
 func (m *brokerMux) fail(err error) {
+	var local *brokerNotAdmitted
+	if errors.As(err, &local) {
+		err = local.cause
+	}
 	m.mu.Lock()
 	if m.err != nil {
 		m.mu.Unlock()
@@ -377,34 +394,37 @@ func (m *brokerMux) fromNative(f brokerFrame) error {
 	f["id"] = c.original
 	return m.enqueue(m.tuiOut, f)
 }
+
+// call returns an error that matches errBrokerNotAdmitted when it ended before
+// its request frame was queued to the native.
 func (m *brokerMux) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return &brokerNotAdmitted{err}
 	}
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return &brokerNotAdmitted{ctx.Err()}
 	case <-m.ctx.Done():
-		return m.ctx.Err()
+		return &brokerNotAdmitted{m.ctx.Err()}
 	case <-m.ready:
 	}
 	p, err := json.Marshal(params)
 	if err != nil {
-		return err
+		return &brokerNotAdmitted{err}
 	}
 	m.mu.Lock()
 	if err := ctx.Err(); err != nil {
 		m.mu.Unlock()
-		return err
+		return &brokerNotAdmitted{err}
 	}
 	if m.err != nil {
 		err := m.err
 		m.mu.Unlock()
-		return err
+		return &brokerNotAdmitted{err}
 	}
 	if len(m.calls) >= brokerRouteLimit {
 		m.mu.Unlock()
-		return errors.New("App Server request limit reached")
+		return &brokerNotAdmitted{errors.New("App Server request limit reached")}
 	}
 	m.next++
 	id := fmt.Sprintf("sessionbus/client/%d", m.next)
@@ -414,7 +434,7 @@ func (m *brokerMux) call(ctx context.Context, method string, params, result any)
 	m.mu.Unlock()
 	if err != nil {
 		m.fail(err)
-		return err
+		return &brokerNotAdmitted{err}
 	}
 	var response appReply
 	select {
