@@ -31,3 +31,12 @@ This prerelease is available now for testing; publication does not mark the rema
 
 The [v0.5.1 notes](v0.5.1.md) describe the coordinated tracing release and its
 daemon compatibility requirements.
+
+## Changes since v0.5.12
+
+- **Interactive Codex: a message is acknowledged when it reaches the peer, and a missed steer is kept.** The receipt for a message to an interactive thread is now `written`, sent as soon as the peer's broker holds the message. It used to be `injected`, sent only after native Codex acknowledged it, and any native failure was reported as `rejected` with no receipt.
+  - The broker then steers the turn in progress or starts a turn when the thread is idle, in arrival order.
+  - A steer that the native refuses as an invalid request (the turn had just ended, a compaction or review was running, or a human interrupt ended the turn) is kept and handed over again on the next message or change of the thread's turn state. Before, it was lost.
+  - A steer or turn start that was sent to the native and failed in any other way, or whose outcome is unknown, is not repeated.
+  - The queue is in memory only: 64 messages or 1 MiB per thread and 16 MiB per broker, then `rejected` with `Sessionbus unsent input limit reached`. It ends with the thread's bus presence.
+  - Lanes are unchanged.

@@ -133,6 +133,11 @@ func gateResidentRetries(o *brokerOwners) (<-chan struct{}, chan<- struct{}) {
 func completeIdleResidentDelivery(t *testing.T, bus, native *muxPipe) {
 	t.Helper()
 	residentBarrier(t, bus)
+	// The receipt is the message reaching this product; it does not wait for the native.
+	receipt := receiveNative(t, bus)
+	if string(receipt["id"]) != "2" || string(receipt["result"]) != `{"disposition":"written"}` {
+		t.Fatal(receipt)
+	}
 	read := receiveNative(t, native)
 	if string(read["method"]) != `"thread/read"` {
 		t.Fatal(read)
@@ -146,10 +151,6 @@ func completeIdleResidentDelivery(t *testing.T, bus, native *muxPipe) {
 	}
 	if err := native.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": turn["id"], "result": brokerRaw(map[string]any{"turn": map[string]string{"id": "barrier-turn"}})}); err != nil {
 		t.Fatal(err)
-	}
-	receipt := receiveNative(t, bus)
-	if string(receipt["id"]) != "2" || string(receipt["result"]) != `{"disposition":"injected"}` {
-		t.Fatal(receipt)
 	}
 }
 func TestBrokerResidentIdentityReadyRenameAndClosed(t *testing.T) {
@@ -206,6 +207,10 @@ func TestBrokerResidentToolAndDeliveryMakeProgressTogether(t *testing.T) {
 	acceptHello(t, bus)
 	// A delivery after hello is processed without waiting on a public tool call.
 	residentBarrier(t, bus)
+	receipt := receiveNative(t, bus)
+	if string(receipt["id"]) != "2" || string(receipt["result"]) != `{"disposition":"written"}` {
+		t.Fatal(receipt)
+	}
 	read := receiveNative(t, p)
 	if string(read["method"]) != `"thread/read"` {
 		t.Fatal(read)
@@ -228,10 +233,6 @@ func TestBrokerResidentToolAndDeliveryMakeProgressTogether(t *testing.T) {
 	}
 	if err := p.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": turn["id"], "result": brokerRaw(map[string]any{"turn": map[string]string{"id": "new-turn"}})}); err != nil {
 		t.Fatal(err)
-	}
-	receipt := receiveNative(t, bus)
-	if string(receipt["id"]) != "2" || string(receipt["result"]) != `{"disposition":"injected"}` {
-		t.Fatal(receipt)
 	}
 	if err := bus.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": public["id"], "result": brokerRaw(map[string]any{"sessions": []any{}})}); err != nil {
 		t.Fatal(err)
@@ -589,15 +590,10 @@ func TestBrokerActiveDeliveryUsesExpectedNativeTurnAndNoReplay(t *testing.T) {
 			o.mu.Lock()
 			resident := o.owners["one"]
 			o.mu.Unlock()
-			type outcome struct {
-				receipt kit.DeliveryReceipt
-				err     error
+			receipt, err := resident.accept(kit.DeliveryRequest{MessageID: "message", From: kit.DeliverySource{SessionID: "sender@local", Product: "fixture", Groups: []string{}}, Body: "native input"})
+			if err != nil || receipt.Disposition != "written" {
+				t.Fatal(receipt, err)
 			}
-			done := make(chan outcome, 1)
-			go func() {
-				receipt, err := resident.deliver(context.Background(), kit.DeliveryRequest{MessageID: "message", From: kit.DeliverySource{SessionID: "sender@local", Product: "fixture", Groups: []string{}}, Body: "native input"})
-				done <- outcome{receipt, err}
-			}()
 			request := receiveNative(t, p)
 			if string(request["method"]) != `"thread/read"` {
 				t.Fatal(request)
@@ -623,19 +619,20 @@ func TestBrokerActiveDeliveryUsesExpectedNativeTurnAndNoReplay(t *testing.T) {
 			} else if err := p.Write(brokerFrame{"id": steer["id"], "result": brokerRaw(map[string]string{"turnId": "native-turn"})}); err != nil {
 				t.Fatal(err)
 			}
-			result := <-done
-			if loss {
-				if result.err == nil {
-					t.Fatal("transport loss invented native receipt")
+			// Acknowledged or uncertain, the message leaves the queue and no call remains or follows.
+			for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+				resident.mu.Lock()
+				queued := len(resident.queue)
+				resident.mu.Unlock()
+				m.mu.Lock()
+				remaining := len(m.calls)
+				m.mu.Unlock()
+				if queued == 0 && remaining == 0 {
+					break
 				}
-			} else if result.err != nil || result.receipt.Disposition != "injected" {
-				t.Fatal(result)
-			}
-			m.mu.Lock()
-			remaining := len(m.calls)
-			m.mu.Unlock()
-			if remaining != 0 {
-				t.Fatal("retained or replayed native call", remaining)
+				if time.Now().After(deadline) {
+					t.Fatal("retained or replayed native delivery", queued, remaining)
+				}
 			}
 		})
 	}

@@ -6,7 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
+	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,6 +20,24 @@ import (
 )
 
 const brokerReconnectInterval = 2 * time.Second
+
+// Interactive deliveries wait in one bounded in-memory FIFO per published
+// thread. The bounds and the overflow reason are those of the OpenCode and
+// Kilo interactive peers.
+const (
+	brokerDeliveryMessages = 64
+	brokerDeliveryBytes    = 1 << 20
+	brokerDeliveryTotal    = 16 << 20
+	brokerDeliveryFull     = "Sessionbus unsent input limit reached"
+)
+
+// brokerDiagnostics receives, once at broker shutdown, one line per kind of
+// delivery that was dropped after an uncertain native handoff: the native
+// method, the outcome class and a count, never native error text or message
+// content. The broker shares its stderr with the native TUI's terminal, so the
+// lines are held until shutdown instead of being written as deliveries drop.
+// Shutdown can precede the TUI's exit when the native connection fails.
+var brokerDiagnostics io.Writer = os.Stderr
 
 type brokerOwners struct {
 	ctx          context.Context
@@ -32,6 +54,10 @@ type brokerOwners struct {
 	dial         func(context.Context, string, string) (net.Conn, error)
 	retry        func(context.Context) bool
 	work         sync.WaitGroup
+	deliveryMu   sync.Mutex // after a resident's mu, never before it
+	deliveryHeld int        // bytes queued across all residents
+	dropped      map[string]int
+	reported     sync.Once
 }
 type brokerResident struct {
 	owner          *brokerOwners
@@ -49,6 +75,9 @@ type brokerResident struct {
 	caller         *kit.Caller
 	changed        chan struct{}
 	handlers       sync.WaitGroup
+	queue          []string // rendered messages; the head stays queued while it is attempted
+	queueBytes     int
+	deliveryWake   chan struct{} // one slot, owned by deliverLoop; publish never reads it
 }
 
 func newBrokerOwners(ctx context.Context, groups []string, socket string) *brokerOwners {
@@ -86,10 +115,11 @@ func (o *brokerOwners) observe(method string, params, result json.RawMessage) er
 			return err
 		}
 		ctx, cancel := context.WithCancel(o.ctx)
-		r := &brokerResident{owner: o, ctx: ctx, cancel: cancel, identity: identity, generation: 1, changed: make(chan struct{}, 1)}
+		r := &brokerResident{owner: o, ctx: ctx, cancel: cancel, identity: identity, generation: 1, changed: make(chan struct{}, 1), deliveryWake: make(chan struct{}, 1)}
 		o.owners[identity.SessionID] = r
-		o.work.Add(1)
+		o.work.Add(2)
 		go r.publish()
+		go r.deliverLoop()
 		if o.startup[identity.SessionID] == "ready" {
 			r.checkToolsLocked()
 		}
@@ -122,6 +152,15 @@ func (o *brokerOwners) observe(method string, params, result json.RawMessage) er
 			r.admitted = false
 			r.mu.Unlock()
 			r.wake()
+		}
+	case "turn/started", "turn/completed", "thread/status/changed":
+		// A turn boundary may let a kept delivery proceed. The event only wakes
+		// the consumer, which reads the native state itself.
+		var event struct{ ThreadID string }
+		if json.Unmarshal(params, &event) == nil {
+			if r := o.owners[event.ThreadID]; r != nil {
+				r.wakeDelivery()
+			}
 		}
 	case "mcpServer/startupStatus/updated":
 		var event struct{ ThreadID, Name, Status string }
@@ -261,6 +300,7 @@ func (o *brokerOwners) End() {
 	}
 	o.mu.Unlock()
 	o.work.Wait()
+	o.reported.Do(o.reportDropped)
 }
 
 func waitBrokerReconnect(ctx context.Context) bool {
@@ -411,6 +451,15 @@ func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
 	}
 	r.handlers.Add(1)
 	r.mu.Unlock()
+	// The SDK runs this handler in frame order on its reader, so the message is
+	// queued here, before the next frame is read: received messages keep their
+	// arrival order. Only the receipt write, which can block, leaves the reader.
+	var receipt kit.DeliveryReceipt
+	var deliveryErr error
+	p, delivery := request.Params.(*protocol.DeliveryRequest)
+	if delivery && admitted && request.Method == "message.deliver" {
+		receipt, deliveryErr = r.accept(*p)
+	}
 	go func() {
 		defer r.handlers.Done()
 		var err error
@@ -418,70 +467,201 @@ func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
 			err = c.Error(request, -32600, nil)
 		} else if !admitted {
 			err = c.Result(request, kit.DeliveryReceipt{Disposition: "rejected", Reason: "unpublished_before_submission"})
-		} else if p, ok := request.Params.(*protocol.DeliveryRequest); ok {
-			receipt, deliveryErr := r.deliver(c.Context(), *p)
-			if deliveryErr != nil {
-				err = c.Error(request, -32603, "uncertain_native_admission")
-			} else {
-				err = c.Result(request, receipt)
-			}
-		} else {
+		} else if !delivery {
 			err = errors.New("invalid delivery request")
+		} else if deliveryErr != nil {
+			err = c.Error(request, -32603, "uncertain_native_admission")
+		} else {
+			err = c.Result(request, receipt)
 		}
 		if err != nil {
 			_ = c.Close()
 		}
 	}()
 }
-func (r *brokerResident) deliver(ctx context.Context, request kit.DeliveryRequest) (kit.DeliveryReceipt, error) {
-	if err := ctx.Err(); err != nil {
-		return kit.DeliveryReceipt{Disposition: "rejected", Reason: "closing"}, nil
-	}
+
+// accept is the bus receipt: the message has reached this product once it is
+// queued here, so the answer is "written" and does not wait for the native.
+// The closed check, the count and both byte reservations are one step.
+func (r *brokerResident) accept(request kit.DeliveryRequest) (kit.DeliveryReceipt, error) {
 	message, err := host.RenderNativeMessage(request)
 	if err != nil {
 		return kit.DeliveryReceipt{}, err
 	}
+	r.mu.Lock()
+	if r.closed || r.ctx.Err() != nil {
+		r.mu.Unlock()
+		return kit.DeliveryReceipt{Disposition: "rejected", Reason: "closing"}, nil
+	}
+	if len(r.queue) >= brokerDeliveryMessages || r.queueBytes+len(message) > brokerDeliveryBytes || !r.owner.holdDelivery(len(message)) {
+		r.mu.Unlock()
+		return kit.DeliveryReceipt{Disposition: "rejected", Reason: brokerDeliveryFull}, nil
+	}
+	r.queue = append(r.queue, message)
+	r.queueBytes += len(message)
+	r.mu.Unlock()
+	r.wakeDelivery()
+	return kit.DeliveryReceipt{Disposition: "written"}, nil
+}
+
+func (o *brokerOwners) holdDelivery(n int) bool {
+	o.deliveryMu.Lock()
+	defer o.deliveryMu.Unlock()
+	if n > brokerDeliveryTotal-o.deliveryHeld {
+		return false
+	}
+	o.deliveryHeld += n
+	return true
+}
+func (o *brokerOwners) releaseDelivery(n int) {
+	o.deliveryMu.Lock()
+	o.deliveryHeld -= n
+	o.deliveryMu.Unlock()
+}
+func (o *brokerOwners) noteDropped(method string, outcome deliveryOutcome) {
+	o.deliveryMu.Lock()
+	if o.dropped == nil {
+		o.dropped = map[string]int{}
+	}
+	o.dropped[method+", "+string(outcome)]++
+	o.deliveryMu.Unlock()
+}
+func (o *brokerOwners) reportDropped() {
+	o.deliveryMu.Lock()
+	kinds := make([]string, 0, len(o.dropped))
+	for kind := range o.dropped {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		fmt.Fprintf(brokerDiagnostics, "sessionbus: Codex interactive delivery not confirmed and not replayed (%s): %d\n", kind, o.dropped[kind])
+	}
+	o.deliveryMu.Unlock()
+}
+func (r *brokerResident) wakeDelivery() {
+	select {
+	case r.deliveryWake <- struct{}{}:
+	default:
+	}
+}
+
+// deliverLoop is the one consumer of a thread's queue. It lives exactly as long
+// as the thread's bus presence and holds nothing after it.
+func (r *brokerResident) deliverLoop() {
+	defer r.owner.work.Done()
+	defer func() {
+		r.mu.Lock()
+		held := r.queueBytes
+		r.queue, r.queueBytes = nil, 0
+		r.mu.Unlock()
+		r.owner.releaseDelivery(held)
+	}()
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-r.deliveryWake:
+		}
+		for {
+			r.mu.Lock()
+			if r.closed || len(r.queue) == 0 {
+				r.mu.Unlock()
+				break
+			}
+			message := r.queue[0]
+			r.mu.Unlock()
+			outcome, method := r.handoff(r.ctx, message)
+			if outcome == deliveryKept {
+				break // the next arrival or native turn event tries again
+			}
+			if outcome != deliveryDone {
+				r.owner.noteDropped(method, outcome)
+			}
+			r.mu.Lock()
+			if len(r.queue) > 0 { // absent only once the queue was discarded
+				r.queue = r.queue[1:]
+				r.queueBytes -= len(message)
+				r.mu.Unlock()
+				r.owner.releaseDelivery(len(message))
+			} else {
+				r.mu.Unlock()
+			}
+		}
+	}
+}
+
+type deliveryOutcome string
+
+const (
+	deliveryDone        deliveryOutcome = "delivered"
+	deliveryKept        deliveryOutcome = "kept"
+	deliveryNativeError deliveryOutcome = "native error"
+	deliveryLost        deliveryOutcome = "transport or cancellation"
+	deliveryBadAck      deliveryOutcome = "unexpected acknowledgement"
+)
+
+// afterTextCall classifies a turn/steer or turn/start failure. A request that
+// was never admitted to the native queue was never attempted. A turn/steer
+// answered -32600 was not accepted by the native. Everything else is an
+// uncertain handoff and is never replayed.
+func afterTextCall(err error, steer bool) deliveryOutcome {
+	if errors.Is(err, errBrokerNotAdmitted) {
+		return deliveryKept
+	}
+	var native *appError
+	if errors.As(err, &native) {
+		if steer && native.Code == -32600 {
+			return deliveryKept
+		}
+		return deliveryNativeError
+	}
+	return deliveryLost
+}
+
+// handoff makes one native attempt for the head message. It keeps the message
+// until a request carrying its text was admitted and the native did not refuse
+// it as a steer.
+func (r *brokerResident) handoff(ctx context.Context, message string) (deliveryOutcome, string) {
 	r.owner.mu.Lock()
 	mux := r.owner.mux
 	r.owner.mu.Unlock()
 	id := r.identity.SessionID
 	var current threadReply
-	if err = mux.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &current); err != nil {
-		return kit.DeliveryReceipt{}, err
-	}
-	if current.Thread.ID != id {
-		return kit.DeliveryReceipt{}, errors.New("native delivery thread mismatch")
+	if err := mux.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &current); err != nil || current.Thread.ID != id {
+		return deliveryKept, "thread/read"
 	}
 	status, err := statusType(current.Thread.Status)
 	if err != nil {
-		return kit.DeliveryReceipt{}, err
+		return deliveryKept, "thread/read"
 	}
 	switch status {
 	case "active":
 		var page struct{ Data []nativeTurn }
 		if err = mux.call(ctx, "thread/turns/list", map[string]any{"threadId": id, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded"}, &page); err != nil {
-			return kit.DeliveryReceipt{}, err
+			return deliveryKept, "thread/turns/list"
 		}
 		if len(page.Data) != 1 || page.Data[0].ID == "" || page.Data[0].Status != "inProgress" {
-			return kit.DeliveryReceipt{}, errors.New("native active turn unavailable")
+			return deliveryKept, "thread/turns/list"
 		}
 		var reply struct{ TurnID string }
-		err = mux.call(ctx, "turn/steer", map[string]any{"threadId": id, "expectedTurnId": page.Data[0].ID, "input": textInput(message)}, &reply)
-		if err == nil && reply.TurnID != page.Data[0].ID {
-			err = errors.New("native steer turn mismatch")
+		if err = mux.call(ctx, "turn/steer", map[string]any{"threadId": id, "expectedTurnId": page.Data[0].ID, "input": textInput(message)}, &reply); err != nil {
+			return afterTextCall(err, true), "turn/steer"
 		}
+		if reply.TurnID != page.Data[0].ID {
+			return deliveryBadAck, "turn/steer"
+		}
+		return deliveryDone, "turn/steer"
 	case "idle":
 		var reply turnReply
-		err = mux.call(ctx, "turn/start", map[string]any{"threadId": id, "input": textInput(message)}, &reply)
-		if err == nil && reply.Turn.ID == "" {
-			err = errors.New("native delivery returned no turn")
+		if err = mux.call(ctx, "turn/start", map[string]any{"threadId": id, "input": textInput(message)}, &reply); err != nil {
+			return afterTextCall(err, false), "turn/start"
 		}
-	default:
-		return kit.DeliveryReceipt{Disposition: "rejected", Reason: "not_loaded"}, nil
+		if reply.Turn.ID == "" {
+			return deliveryBadAck, "turn/start"
+		}
+		return deliveryDone, "turn/start"
 	}
-	// A successful native acknowledgement remains injected across later terminal
-	// events or cancellation. A transport failure never becomes native refusal.
-	return kit.DeliveryReceipt{Disposition: "injected"}, err
+	return deliveryKept, "thread/read" // not loaded: nothing was sent
 }
 
 func (o *brokerOwners) action(ctx context.Context, action string, args, meta json.RawMessage) (json.RawMessage, error) {
