@@ -277,7 +277,7 @@ func statusType(raw json.RawMessage) (string, error) {
 	var object struct {
 		Type string `json:"type"`
 	}
-	if json.Unmarshal(raw, &object) != nil || !slices.Contains([]string{"active", "idle", "notLoaded"}, object.Type) {
+	if json.Unmarshal(raw, &object) != nil || !slices.Contains([]string{"active", "idle", "notLoaded", "systemError"}, object.Type) {
 		return "", errors.New("Codex App Server returned an unsupported thread status")
 	}
 	return object.Type, nil
