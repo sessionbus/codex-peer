@@ -40,3 +40,4 @@ daemon compatibility requirements.
   - A steer or turn start that was sent to the native and failed in any other way, or whose outcome is unknown, is not repeated.
   - The queue is in memory only: 64 messages or 1 MiB per thread and 16 MiB per broker, then `rejected` with `Sessionbus unsent input limit reached`. It ends with the thread's bus presence.
   - Lanes are unchanged.
+- **Interactive Codex: a message wakes a thread whose last turn ended in an error.** A peer message for an interactive Codex thread whose last turn ended in an error now starts a turn instead of waiting until a person starts one; this rests on the native Codex 0.162.1 source and has not been observed on a host.

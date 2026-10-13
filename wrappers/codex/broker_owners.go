@@ -651,7 +651,10 @@ func (r *brokerResident) handoff(ctx context.Context, message string) (deliveryO
 			return deliveryBadAck, "turn/steer"
 		}
 		return deliveryDone, "turn/steer"
-	case "idle":
+	case "idle", "systemError":
+		// By Codex 0.162.1 source the native reports systemError from a turn that
+		// ended in an error until the next turn starts, and turn/start does not read
+		// the status.
 		var reply turnReply
 		if err = mux.call(ctx, "turn/start", map[string]any{"threadId": id, "input": textInput(message)}, &reply); err != nil {
 			return afterTextCall(err, false), "turn/start"

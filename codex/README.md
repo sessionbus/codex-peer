@@ -166,7 +166,8 @@ those absence checkpoints.
 A message to an interactive thread is acknowledged with `written` as soon as the
 broker holds it. That receipt does not mean native Codex has taken it. The broker
 then hands messages to the native in arrival order: it steers the turn in
-progress, or starts a turn when the thread is idle. A steer that the native
+progress, or starts a turn when the thread is idle, including after a turn that
+ended in an error. A steer that the native
 refuses as an invalid request, for example because the turn had just ended or a
 compaction was running, is kept and handed over again on the next message or
 change of the thread's turn state. A steer or turn start that was sent to the

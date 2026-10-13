@@ -276,6 +276,36 @@ func TestBrokerDeliveryBoundsUseTheExistingRefusal(t *testing.T) {
 	})
 }
 
+// Native Codex reports systemError for a thread whose last turn ended in an
+// error, until the next turn starts. A message for such a thread starts that
+// turn. A status this broker does not know starts nothing: the message is
+// kept, and the next native request is the read made on the next turn event.
+func TestBrokerDeliveryStartsATurnAfterAnErrorEndedTurn(t *testing.T) {
+	t.Run("systemError", func(t *testing.T) {
+		o, _, native, bus := deliveryFixture(t)
+		sendDelivery(t, bus, 2, "ERRORED-BODY")
+		expectWritten(t, bus, 2)
+		answerThread(t, native, "systemError")
+		start := expectNative(t, native, "turn/start")
+		if text := inputText(t, start); !strings.Contains(text, "ERRORED-BODY") {
+			t.Fatalf("input after an error-ended turn: %q", text)
+		}
+		answerNative(t, native, start, map[string]any{"turn": map[string]string{"id": "turn-1"}})
+		eventually(t, "the queue to drain", func() bool { return held(o) == 0 })
+	})
+	t.Run("unknown status", func(t *testing.T) {
+		o, m, native, bus := deliveryFixture(t)
+		sendDelivery(t, bus, 2, "UNKNOWN-BODY")
+		expectWritten(t, bus, 2)
+		answerThread(t, native, "someLaterStatus")
+		nativeEvent(t, native, m, "thread/status/changed", map[string]any{"threadId": "one", "status": map[string]string{"type": "idle"}})
+		if text := expectStart(t, native, "turn-1"); !strings.Contains(text, "UNKNOWN-BODY") {
+			t.Fatalf("kept input: %q", text)
+		}
+		eventually(t, "the kept message to leave the queue", func() bool { return held(o) == 0 })
+	})
+}
+
 // The queue belongs to the published thread, not to one bus connection.
 func TestBrokerDeliverySurvivesTheReceiptConnection(t *testing.T) {
 	o, _, native, bus := deliveryFixture(t)
