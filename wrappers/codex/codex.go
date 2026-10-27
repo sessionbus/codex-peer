@@ -30,6 +30,7 @@ type Wrapper struct {
 	child             *nativeChild
 	app               *appClient
 	id, model, effort string
+	cwd               string // the thread's effective cwd, verified at open
 	approval          string
 	sandbox           string
 	active            *turn
@@ -218,7 +219,7 @@ func (p *Wrapper) Open(ctx context.Context, request sessionkit.OpenRequest) (res
 		return cleanup(err)
 	}
 	p.mu.Lock()
-	p.id = threadID
+	p.id, p.cwd = threadID, effectiveCwd
 	p.mu.Unlock()
 	if err = p.awaitTools(nativeCtx, threadID); err != nil {
 		return result, err

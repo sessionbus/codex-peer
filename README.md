@@ -96,6 +96,17 @@ permission values, delivery receipts and lifecycle. `describe` lists available
 fields; product documentation supplies their meaning and allowed native values.
 Do not apply the orchestrator product's native options to a different lane product.
 
+### File transfer
+
+The `sessionbus` tool's `transfer.*` actions exchange files with another
+session. The Sessionbus SDK reads and writes them directly as your OS user;
+codex-peer adds no permission layer of its own. A relative `source` or
+`destination` is resolved against the Codex thread's working directory; with
+no known working directory, only an absolute path is accepted. Offers,
+requests and final results arrive as ordinary messages. Transfers need a
+transfer-capable daemon; an older one refuses them, and every other action
+stays available.
+
 ### Parent tracing
 
 The unified tool's `trace` action can enable `events` or `content` tracing for
