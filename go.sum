@@ -1,9 +1,7 @@
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
-github.com/antst/sessionbus/bus/sdk/go v0.5.9 h1:dRXXkemDBwtYo4FzbUkOXs36UixeB+9HJMdamzP7Dwo=
-github.com/antst/sessionbus/bus/sdk/go v0.5.9/go.mod h1:SujgzvvPHjgVO/vHIixeL9EbOS8NPs/zXJA5ISSFnqM=
-github.com/antst/sessionbus/bus/sdk/go v0.5.13-0.20261027190635-4b361c553279 h1:YtH7yACZmnFeZLjPqjkTzlA6rniFXSc64qVOOZ2yUok=
-github.com/antst/sessionbus/bus/sdk/go v0.5.13-0.20261027190635-4b361c553279/go.mod h1:SujgzvvPHjgVO/vHIixeL9EbOS8NPs/zXJA5ISSFnqM=
+github.com/antst/sessionbus/bus/sdk/go v0.5.14-0.20261104102655-73d4eebc7a83 h1:vcxxeHtSQo2S3UWg13NlnGoakNbHJgNivXYZ6hhoNf0=
+github.com/antst/sessionbus/bus/sdk/go v0.5.14-0.20261104102655-73d4eebc7a83/go.mod h1:SujgzvvPHjgVO/vHIixeL9EbOS8NPs/zXJA5ISSFnqM=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 h1:lZUw3E0/J3roVtGQ+SCrUrg3ON6NgVqpn3+iol9aGu4=

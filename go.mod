@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/antst/sessionbus/bus/sdk/go v0.5.13-0.20261027190635-4b361c553279
+	github.com/antst/sessionbus/bus/sdk/go v0.5.14-0.20261104102655-73d4eebc7a83
 	golang.org/x/sys v0.30.0
 )
 
