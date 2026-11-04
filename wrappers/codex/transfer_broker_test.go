@@ -364,3 +364,70 @@ func TestBrokerFailedRehelloJoinsTransferCleanupBeforeReconnect(t *testing.T) {
 	next := expectNoReconnectUntilJoined(t, buses, gate)
 	expectTransferSuccessor(t, o, next, "renamed")
 }
+
+// A sent file's final notice is projected too (a source cleanup failure would
+// show there) and waits for the transfer to retire. Retirement needs both the
+// finish reply and the machine terminal notice, which arrive on the same
+// reader, so a later delivery and both of those still progress while the
+// notice is held.
+func TestBrokerHeldSourceFinalNoticeKeepsTheReaderMoving(t *testing.T) {
+	cwd := t.TempDir()
+	content := []byte("sent body\n")
+	digest := sha256.Sum256(content)
+	sum := hex.EncodeToString(digest[:])
+	size := len(content)
+	if err := os.WriteFile(filepath.Join(cwd, "notes.txt"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o, _, _, bus, _, _ := transferBroker(t, cwd, nil, false)
+	offerAndPrepare(t, o, bus, "tr-out", size)
+
+	writeBus(t, bus, frame("transfer.start", 901, map[string]any{"id": "tr-out", "role": "source", "size": size, "credit": protocol.TransferCreditBytes}))
+	var finish brokerFrame
+	for started, chunked := false, false; !started || finish == nil; {
+		f := receiveNative(t, bus)
+		switch {
+		case string(f["id"]) == "901" && f["method"] == nil:
+			started = true
+		case string(f["method"]) == `"transfer.chunk"` && !chunked:
+			chunked = true
+			writeBus(t, bus, brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": f["id"], "result": brokerRaw(map[string]any{"offset": size})})
+		case string(f["method"]) == `"transfer.finish"`:
+			finish = f
+		default:
+			t.Fatalf("unexpected frame while streaming = %s %s", f["method"], f["id"])
+		}
+	}
+
+	// The ordinary terminal notice arrives while the finish reply and the
+	// machine terminal notice are both still outstanding. Daemon request IDs
+	// keep increasing on one connection.
+	terminal, _ := json.Marshal(map[string]any{"kind": "terminal", "id": "tr-out", "outcome": "completed", "bytes": size, "sha256": sum})
+	writeBus(t, bus, frame("message.deliver", 902, kit.DeliveryRequest{MessageID: "transfer-notice-tr-out", From: transferPeer, Body: string(terminal)}))
+	writeBus(t, bus, frame("message.deliver", 903, kit.DeliveryRequest{MessageID: "later", From: transferPeer, Body: "later message"}))
+	if receipt := receiveNative(t, bus); string(receipt["id"]) != "903" || string(receipt["result"]) != `{"disposition":"written"}` {
+		t.Fatalf("first reply while the projection is held = %s %s %s", receipt["id"], receipt["result"], receipt["error"])
+	}
+	writeBus(t, bus, brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": finish["id"], "result": brokerRaw(map[string]any{"id": "tr-out", "outcome": "completed", "bytes": size, "sha256": sum})})
+	writeBus(t, bus, frame("transfer.notice", 904, map[string]any{"kind": "terminal", "id": "tr-out", "outcome": "completed", "bytes": size, "sha256": sum}))
+	replies := map[string]brokerFrame{}
+	for len(replies) < 2 {
+		reply := receiveNative(t, bus)
+		replies[string(reply["id"])] = reply
+	}
+	if ack := replies["904"]; ack == nil || ack["error"] != nil {
+		t.Fatalf("machine terminal ack = %v", ack)
+	}
+	if receipt := replies["902"]; receipt == nil || string(receipt["result"]) != `{"disposition":"written"}` {
+		t.Fatalf("final notice receipt = %v", receipt)
+	}
+	o.mu.Lock()
+	r := o.owners["one"]
+	o.mu.Unlock()
+	r.mu.Lock()
+	queued := strings.Join(r.queue, "\n")
+	r.mu.Unlock()
+	if !strings.Contains(queued, "later message") || !strings.Contains(queued, `"id":"tr-out"`) || strings.Contains(queued, `"destination"`) {
+		t.Fatalf("queued deliveries = %s", queued)
+	}
+}

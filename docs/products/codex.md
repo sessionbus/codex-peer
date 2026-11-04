@@ -24,12 +24,14 @@ The core SDK owns the transfer engine and its direct filesystem executor;
   relative `source`/`destination` to the thread's cwd (without cleaning, so
   the filesystem resolves links and `..`) and refuses it when the cwd is
   unknown.
-- **Final notices.** A transfer's final notice for a file this thread
-  received gains its local destination through `ProjectDelivery`. That
-  projection can wait for the publication in flight and for the transfer's
-  resources to be released, which needs the connection's reader, so the
-  broker runs it off the reader before queueing the notice. A message arriving during that short wait can be queued before
-  the notice; every other delivery keeps its arrival order.
+- **Final notices.** A transfer's final notice gains this thread's local
+  projection through `ProjectDelivery`: the destination of a file it
+  received, or a source cleanup failure for a file it sent. That projection
+  can wait for the publication in flight and for the transfer's resources to
+  be released, which needs the connection's reader, so the broker runs it off
+  the reader before queueing the notice. A message arriving during that short
+  wait can be queued before the notice; every other delivery keeps its
+  arrival order.
 
 ## Current Go candidate, 2026-09-09
 

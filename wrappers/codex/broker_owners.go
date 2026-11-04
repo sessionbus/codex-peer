@@ -474,10 +474,11 @@ func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
 	var project func(context.Context, *kit.DeliveryRequest) error
 	p, delivery := request.Params.(*protocol.DeliveryRequest)
 	if delivery && admitted && request.Method == "message.deliver" {
-		// A transfer's final notice for a file this thread received gains its
-		// local destination. That projection can wait for the publication in
-		// flight, which needs this reader, so it runs below, off the reader:
-		// a message arriving meanwhile can be queued before that notice.
+		// A transfer's final notice gains this thread's local projection: the
+		// destination of a file it received, or a source cleanup failure. The
+		// projection waits for the transfer to retire, which needs this reader,
+		// so it runs below, off the reader: a message arriving meanwhile can be
+		// queued before that notice.
 		if project = r.transfers.ProjectDelivery(source, p); project == nil {
 			receipt, deliveryErr = r.accept(*p)
 		}
