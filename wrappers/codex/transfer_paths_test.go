@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/antst/sessionbus/bus/sdk/go/protocol"
 )
@@ -58,84 +57,13 @@ func TestBrokerTransferOfferUsesTheThreadCwdAndTheSDKServesItsPrepare(t *testing
 	if err := os.WriteFile(filepath.Join(cwd, "notes.txt"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	o, m, p, buses := residentFixture(t)
-	nativeEvent(t, p, m, "thread/started", map[string]any{"thread": map[string]any{"id": "one", "cwd": cwd, "status": map[string]string{"type": "idle"}}})
-	readyCatalog(t, m, p, "one")
-	bus := receiveBus(t, buses)
-	hello := receiveNative(t, bus)
+	o, _, _, bus, _, hello := transferBroker(t, cwd, nil, false)
 	var helloParams struct{ Info map[string]any }
-	if string(hello["method"]) != `"session.hello"` || json.Unmarshal(hello["params"], &helloParams) != nil ||
+	if json.Unmarshal(hello["params"], &helloParams) != nil ||
 		helloParams.Info[protocol.TransferInfoKey] != float64(1) || helloParams.Info["cwd"] != cwd {
 		t.Fatalf("hello = %s", hello["params"])
 	}
-	if err := bus.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": hello["id"], "result": brokerRaw(map[string]any{"capabilities": []string{protocol.TransferCapability}})}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		o.mu.Lock()
-		r := o.owners["one"]
-		o.mu.Unlock()
-		r.mu.Lock()
-		admitted := r.admitted
-		r.mu.Unlock()
-		if admitted {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("thread was not admitted")
-		}
-		time.Sleep(time.Millisecond)
-	}
-
-	type actionResult struct {
-		out json.RawMessage
-		err error
-	}
-	// The SDK attaches transfers in the hello observer after our admission
-	// callback; a response read after the hello frame proves both ran.
-	listed := make(chan actionResult, 1)
-	go func() {
-		out, err := o.action(context.Background(), "list", json.RawMessage(`{}`), json.RawMessage(`{"threadId":"one"}`))
-		listed <- actionResult{out, err}
-	}()
-	list := receiveNative(t, bus)
-	if string(list["method"]) != `"session.list"` {
-		t.Fatalf("barrier = %s", list["method"])
-	}
-	if err := bus.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": list["id"], "result": brokerRaw(map[string]any{"sessions": []any{}})}); err != nil {
-		t.Fatal(err)
-	}
-	if got := <-listed; got.err != nil {
-		t.Fatal(got.err)
-	}
-	offered := make(chan actionResult, 1)
-	go func() {
-		out, err := o.action(context.Background(), "transfer.offer", json.RawMessage(`{"target":"peer@local","source":"notes.txt"}`), json.RawMessage(`{"threadId":"one"}`))
-		offered <- actionResult{out, err}
-	}()
-	offer := receiveNative(t, bus)
-	if string(offer["method"]) != `"transfer.offer"` || string(offer["params"]) != `{"target":"peer@local","name":"notes.txt"}` {
-		t.Fatalf("wire offer = %s %s", offer["method"], offer["params"])
-	}
-	descriptor := map[string]any{"id": "tr-one", "sender": "one", "receiver": "peer@local", "name": "notes.txt", "created_by": "one", "state": "offered", "bytes": 0}
-	if err := bus.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": offer["id"], "result": brokerRaw(descriptor)}); err != nil {
-		t.Fatal(err)
-	}
-	if got := <-offered; got.err != nil || !strings.Contains(string(got.out), `"id":"tr-one"`) {
-		t.Fatalf("offer result = %s, %v", got.out, got.err)
-	}
-	if err := bus.Write(brokerFrame{"jsonrpc": brokerRaw("2.0"), "id": brokerRaw(900), "method": brokerRaw("transfer.prepare"), "params": brokerRaw(map[string]any{"id": "tr-one", "role": "source"})}); err != nil {
-		t.Fatal(err)
-	}
-	prepared := receiveNative(t, bus)
-	var result struct {
-		ID   string
-		Size int
-	}
-	if string(prepared["id"]) != "900" || json.Unmarshal(prepared["result"], &result) != nil || result.ID != "tr-one" || result.Size != len(content) {
-		t.Fatalf("prepare reply = %s", prepared["result"])
-	}
+	offerAndPrepare(t, o, bus, "tr-one", len(content))
 	_ = bus.Close()
 	o.End()
 }
