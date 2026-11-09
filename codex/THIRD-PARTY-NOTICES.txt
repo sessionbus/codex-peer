@@ -24,8 +24,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 
-github.com/antst/sessionbus/bus/sdk/go v0.5.9
-=============================================
+github.com/antst/sessionbus/bus/sdk/go v0.5.14-0.20261104133946-a831f180d561
+============================================================================
 
 MIT License
 
@@ -68,7 +68,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
-github.com/sessionbus/peer-common v0.0.0-20260929103915-8348c6c8b18c
+github.com/sessionbus/peer-common v0.0.0-20261109114258-5d386b238738
 ====================================================================
 
 MIT License
