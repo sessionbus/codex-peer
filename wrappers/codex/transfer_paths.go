@@ -5,6 +5,7 @@ package codex
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -31,6 +32,17 @@ func bindTransferPaths(action string, args json.RawMessage, cwd string) (json.Ra
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(args, &fields) != nil || fields == nil {
 		return args, nil
+	}
+	// The SDK decodes these fields as Go's encoding/json does, matching a key
+	// to a field case-insensitively (also "ſ" for "s"), so another spelling
+	// of a path key would reach it unbound. Such a key is refused, alone or
+	// beside the documented one, as the SDK refuses a field it does not know.
+	for key := range fields {
+		for _, name := range keys {
+			if key != name && strings.EqualFold(key, name) {
+				return nil, fmt.Errorf("json: unknown field %q", key)
+			}
+		}
 	}
 	changed := false
 	for _, key := range keys {
