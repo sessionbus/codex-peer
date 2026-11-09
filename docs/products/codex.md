@@ -6,6 +6,33 @@
 > commit recorded by the split archive manifest. Host evidence paths are
 > immutable external artifacts, not repository paths.
 
+## File transfer binding (2026-10-28)
+
+The core SDK owns the transfer engine and its direct filesystem executor;
+`go.mod` pins the exact core revision. codex-peer only binds it:
+
+- **Lane.** `NewWorker` enables transfers by default and `worker.Caller()`
+  routes `transfer.*` locally. The lane keeps the thread's effective cwd that
+  `thread/start`/`thread/resume` proved at open.
+- **Interactive broker.** Each native thread's resident owns one
+  `NewConnectionTransfers(nil)`. Its hello goes through `HelloObserved`, the
+  SDK's own requests through `HandleConnectionRequest` on the reader, its
+  caller is `NewCallerWithTransfers`, and `CloseConnectionGeneration` runs
+  when a connection ends and when the resident retires.
+- **Paths.** The SDK opens a path as given, so a relative path would resolve
+  against the broker or worker process's directory. The tool owner joins a
+  relative `source`/`destination` to the thread's cwd (without cleaning, so
+  the filesystem resolves links and `..`) and refuses it when the cwd is
+  unknown.
+- **Final notices.** A transfer's final notice gains this thread's local
+  projection through `ProjectDelivery`: the destination of a file it
+  received, or a source cleanup failure for a file it sent. That projection
+  can wait for the publication in flight and for the transfer's resources to
+  be released, which needs the connection's reader, so the broker runs it off
+  the reader before queueing the notice. A message arriving during that short
+  wait can be queued before the notice; every other delivery keeps its
+  arrival order.
+
 ## Current Go candidate, 2026-09-09
 
 Mandatory-wake source update (2026-09-21): an idle lane delivery returns

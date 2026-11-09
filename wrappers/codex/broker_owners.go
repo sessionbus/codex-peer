@@ -73,6 +73,7 @@ type brokerResident struct {
 	closed         bool
 	connection     *kit.Connection
 	caller         *kit.Caller
+	transfers      *kit.Transfers // one SDK transfer owner for this native thread's lifetime
 	changed        chan struct{}
 	handlers       sync.WaitGroup
 	queue          []string // rendered messages; the head stays queued while it is attempted
@@ -114,8 +115,12 @@ func (o *brokerOwners) observe(method string, params, result json.RawMessage) er
 		if _, err := protocol.EncodeParams("session.hello", identity); err != nil {
 			return err
 		}
+		transfers, err := kit.NewConnectionTransfers(nil)
+		if err != nil {
+			return err
+		}
 		ctx, cancel := context.WithCancel(o.ctx)
-		r := &brokerResident{owner: o, ctx: ctx, cancel: cancel, identity: identity, generation: 1, changed: make(chan struct{}, 1), deliveryWake: make(chan struct{}, 1)}
+		r := &brokerResident{owner: o, ctx: ctx, cancel: cancel, identity: identity, generation: 1, changed: make(chan struct{}, 1), deliveryWake: make(chan struct{}, 1), transfers: transfers}
 		o.owners[identity.SessionID] = r
 		o.work.Add(2)
 		go r.publish()
@@ -328,6 +333,9 @@ func (r *brokerResident) publish() {
 	defer func() {
 		r.retireFromPublisher()
 		r.handlers.Wait()
+		// Cancel and join the SDK's transfer work on every connection of
+		// this thread before the resident is gone.
+		r.transfers.CloseConnectionGeneration(nil)
 		r.owner.work.Done()
 	}()
 	var c *kit.Connection
@@ -356,11 +364,11 @@ func (r *brokerResident) publish() {
 					return
 				}
 				r.connection = c
-				r.caller = kit.NewCaller(func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+				r.caller = kit.NewCallerWithTransfers(func(ctx context.Context, method string, params any) (json.RawMessage, error) {
 					var out json.RawMessage
 					err := attempt.Call(ctx, method, params, &out)
 					return out, err
-				})
+				}, r.transfers)
 				r.mu.Unlock()
 				close(published)
 			}
@@ -379,8 +387,9 @@ func (r *brokerResident) publish() {
 			if !tools || admitted {
 				continue
 			}
-			var hello json.RawMessage
-			err := c.CallObserved(r.ctx, "session.hello", identity, &hello, func() error {
+			// The SDK adds its transfer bit to the hello and binds this
+			// connection's transfers to the thread's lifetime.
+			err := r.transfers.HelloObserved(r.ctx, r.ctx, c, identity, func() error {
 				r.mu.Lock()
 				defer r.mu.Unlock()
 				if !r.closed && r.generation == generation && r.tools {
@@ -391,6 +400,7 @@ func (r *brokerResident) publish() {
 			if err != nil {
 				r.clearConnection(c)
 				_ = c.Close()
+				r.transfers.CloseConnectionGeneration(c)
 				c = nil
 				if brokerInvalidHello(err) {
 					return
@@ -416,6 +426,7 @@ func (r *brokerResident) publish() {
 			return
 		case <-connectionDone:
 			r.clearConnection(c)
+			r.transfers.CloseConnectionGeneration(c)
 			c = nil
 			if !r.owner.retry(r.ctx) {
 				return
@@ -431,6 +442,10 @@ func brokerInvalidHello(err error) bool {
 }
 
 func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
+	// The SDK's own transfer requests stay with the SDK, on this reader.
+	if r.transfers.HandleConnectionRequest(source, request) {
+		return
+	}
 	r.mu.Lock()
 	c, admitted := r.connection, r.admitted && !r.closed
 	if c == nil || c != source || r.closed {
@@ -456,12 +471,27 @@ func (r *brokerResident) handle(source *kit.Connection, request *kit.Request) {
 	// arrival order. Only the receipt write, which can block, leaves the reader.
 	var receipt kit.DeliveryReceipt
 	var deliveryErr error
+	var project func(context.Context, *kit.DeliveryRequest) error
 	p, delivery := request.Params.(*protocol.DeliveryRequest)
 	if delivery && admitted && request.Method == "message.deliver" {
-		receipt, deliveryErr = r.accept(*p)
+		// A transfer's final notice gains this thread's local projection: the
+		// destination of a file it received, or a source cleanup failure. The
+		// projection waits for the transfer to retire, which needs this reader,
+		// so it runs below, off the reader: a message arriving meanwhile can be
+		// queued before that notice.
+		if project = r.transfers.ProjectDelivery(source, p); project == nil {
+			receipt, deliveryErr = r.accept(*p)
+		}
 	}
 	go func() {
 		defer r.handlers.Done()
+		if project != nil {
+			if err := project(r.ctx, p); err != nil {
+				receipt = kit.DeliveryReceipt{Disposition: "rejected", Reason: "closing"}
+			} else {
+				receipt, deliveryErr = r.accept(*p)
+			}
+		}
 		var err error
 		if request.Method != "message.deliver" {
 			err = c.Error(request, -32600, nil)
@@ -680,9 +710,14 @@ func (o *brokerOwners) action(ctx context.Context, action string, args, meta jso
 	}
 	r.mu.Lock()
 	admitted, caller, connection := r.admitted && r.tools && !r.closed, r.caller, r.connection
+	cwd, _ := r.identity.Info["cwd"].(string)
 	r.mu.Unlock()
 	if !admitted || caller == nil {
 		return nil, errors.New("native Sessionbus tool is not ready")
+	}
+	args, err := bindTransferPaths(action, args, cwd)
+	if err != nil {
+		return nil, err
 	}
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

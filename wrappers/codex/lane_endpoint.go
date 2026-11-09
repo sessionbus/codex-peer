@@ -110,6 +110,13 @@ func (b *laneToolOwner) ActionWithMeta(ctx context.Context, action string, args,
 	return b.Action(ctx, action, args)
 }
 func (b *laneToolOwner) Action(ctx context.Context, action string, args json.RawMessage) (json.RawMessage, error) {
+	b.owner.mu.Lock()
+	cwd := b.owner.cwd
+	b.owner.mu.Unlock()
+	args, err := bindTransferPaths(action, args, cwd)
+	if err != nil {
+		return nil, err
+	}
 	return b.owner.caller.Action(ctx, action, args)
 }
 func (b *laneToolOwner) End() {
