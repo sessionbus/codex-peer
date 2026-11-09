@@ -10,4 +10,4 @@ require (
 
 require github.com/coder/websocket v1.8.15
 
-require github.com/sessionbus/peer-common v0.0.0-20260929103915-8348c6c8b18c
+require github.com/sessionbus/peer-common v0.0.0-20261109114258-5d386b238738

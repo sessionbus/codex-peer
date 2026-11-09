@@ -70,7 +70,7 @@ func TestModuleAndImportBoundary(t *testing.T) {
 	if !bytes.Contains(module, []byte("module "+peersModule+"\n")) || !bytes.Contains(module, []byte(sdkModule+" "+sdkVersion)) {
 		t.Fatalf("go.mod violates the peers module shape:\n%s", module)
 	}
-	if !bytes.Contains(module, []byte("github.com/sessionbus/peer-common v0.0.0-20260929103915-8348c6c8b18c")) {
+	if !bytes.Contains(module, []byte("github.com/sessionbus/peer-common v0.0.0-20261109114258-5d386b238738")) {
 		t.Fatal("shared support must use the reviewed immutable module version")
 	}
 	if bytes.Contains(module, []byte("replace ")) {
