@@ -100,7 +100,9 @@ Do not apply the orchestrator product's native options to a different lane produ
 
 The `sessionbus` tool's `transfer.*` actions exchange files with another
 session. The Sessionbus SDK reads and writes them directly as your OS user;
-codex-peer adds no permission layer of its own. A relative `source` or
+codex-peer adds no permission layer of its own. After a Sessionbus tool call
+is admitted, the SDK accesses files without applying the Codex thread sandbox
+or requesting a separate native approval for each path. A relative `source` or
 `destination` is resolved against the Codex thread's working directory; with
 no known working directory, only an absolute path is accepted. Offers,
 requests and final results arrive as ordinary messages. Transfers need a
