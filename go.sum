@@ -1,12 +1,12 @@
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
-github.com/antst/sessionbus/bus/sdk/go v0.5.14-0.20261110081323-cd8aa6a9b7c3 h1:hLp9jE2q4TFVc4tOxjT4AInQR0gtwWtgw47dkRsLJVk=
-github.com/antst/sessionbus/bus/sdk/go v0.5.14-0.20261110081323-cd8aa6a9b7c3/go.mod h1:SujgzvvPHjgVO/vHIixeL9EbOS8NPs/zXJA5ISSFnqM=
+github.com/antst/sessionbus/bus/sdk/go v0.5.16 h1:hnsyA/Ty5JjxC4bQnFVqnhpx3UPchHmyGYq5fWIqQOo=
+github.com/antst/sessionbus/bus/sdk/go v0.5.16/go.mod h1:SujgzvvPHjgVO/vHIixeL9EbOS8NPs/zXJA5ISSFnqM=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 h1:lZUw3E0/J3roVtGQ+SCrUrg3ON6NgVqpn3+iol9aGu4=
 github.com/santhosh-tekuri/jsonschema/v5 v5.3.1/go.mod h1:uToXkOrWAZ6/Oc07xWQrPOhJotwFIyu2bBVN41fcDUY=
-github.com/sessionbus/peer-common v0.0.0-20261110085456-8c692a4694ac h1:UM9TFFxqM8g5Dss+I1exHXZve/4dj4Evh7C+zthU18U=
-github.com/sessionbus/peer-common v0.0.0-20261110085456-8c692a4694ac/go.mod h1:CeW5i8tbpeYnlG7O/ftzlTXcYgZ9A5s1SO5iMIRbzL4=
+github.com/sessionbus/peer-common v0.0.0-20261112015618-29ddcb4585de h1:8pTvEDkbZUDX1JPB5vF0MT4qvJ1r3tc1jw5eTMGaCng=
+github.com/sessionbus/peer-common v0.0.0-20261112015618-29ddcb4585de/go.mod h1:cbJuxKVvLgrxyk6gl5ZPgKNCWpXiUmx7NiQg0Zy4dg0=
 golang.org/x/sys v0.30.0 h1:QjkSwP/36a20jFYWkSue1YwXzLmsV5Gfq7Eiy72C1uc=
 golang.org/x/sys v0.30.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=

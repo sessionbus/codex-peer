@@ -27,6 +27,7 @@ func TestBrokerTransferRefusalKeepsTheConnection(t *testing.T) {
 	}{
 		{"transfer.offer", `{"target":"peer@local","source":"missing-is-fine.txt"}`, "transfer.offer", "unsupported_transfer", protocol.UnsupportedTransfer},
 		{"transfer.status", `{"id":"tr-unknown"}`, "transfer.status", "transfer_failed", protocol.TransferFailed},
+		{"transfer.status", `{"id":"tr-unknown"}`, "transfer.status", "unknown_transfer", protocol.UnknownTransfer},
 	} {
 		type actionResult struct {
 			out json.RawMessage
