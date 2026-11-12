@@ -17,6 +17,7 @@ import (
 	kit "github.com/antst/sessionbus/bus/sdk/go"
 	"github.com/antst/sessionbus/bus/sdk/go/protocol"
 	"github.com/sessionbus/peer-common/host"
+	"github.com/sessionbus/peer-common/mcp"
 )
 
 const brokerReconnectInterval = 2 * time.Second
@@ -715,7 +716,7 @@ func (o *brokerOwners) action(ctx context.Context, action string, args, meta jso
 	if !admitted || caller == nil {
 		return nil, errors.New("native Sessionbus tool is not ready")
 	}
-	args, err := bindTransferPaths(action, args, cwd)
+	args, err := mcp.BindTransferPaths(action, args, cwd)
 	if err != nil {
 		return nil, err
 	}
