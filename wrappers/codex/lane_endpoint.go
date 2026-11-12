@@ -113,7 +113,7 @@ func (b *laneToolOwner) Action(ctx context.Context, action string, args json.Raw
 	b.owner.mu.Lock()
 	cwd := b.owner.cwd
 	b.owner.mu.Unlock()
-	args, err := bindTransferPaths(action, args, cwd)
+	args, err := mcp.BindTransferPaths(action, args, cwd)
 	if err != nil {
 		return nil, err
 	}

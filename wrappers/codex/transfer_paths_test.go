@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/antst/sessionbus/bus/sdk/go/protocol"
+	"github.com/sessionbus/peer-common/mcp"
 )
 
 func TestBindTransferPathsJoinsOnlyRelativeLocalPaths(t *testing.T) {
@@ -27,7 +28,11 @@ func TestBindTransferPathsJoinsOnlyRelativeLocalPaths(t *testing.T) {
 		{"non-string left to the SDK", "transfer.offer", `{"target":"t","source":7}`, "", `{"target":"t","source":7}`},
 		{"invalid JSON left to the SDK", "transfer.offer", `{`, "", `{`},
 	} {
-		got, err := bindTransferPaths(tc.action, json.RawMessage(tc.args), tc.cwd)
+		args := json.RawMessage(tc.args)
+		got, err := mcp.BindTransferPaths(tc.action, args, tc.cwd)
+		if string(args) != tc.args {
+			t.Fatalf("%s: caller arguments changed: %s", tc.name, args)
+		}
 		if err != nil || string(got) != tc.want {
 			t.Fatalf("%s: got %s, %v; want %s", tc.name, got, err, tc.want)
 		}
@@ -38,12 +43,12 @@ func TestBindTransferPathsJoinsOnlyRelativeLocalPaths(t *testing.T) {
 // than resolved against this process's directory.
 func TestBindTransferPathsRefusesARelativePathWithoutTheThreadCwd(t *testing.T) {
 	for _, cwd := range []string{"", "relative/dir"} {
-		if _, err := bindTransferPaths("transfer.offer", json.RawMessage(`{"target":"t","source":"a.txt"}`), cwd); err == nil ||
+		if _, err := mcp.BindTransferPaths("transfer.offer", json.RawMessage(`{"target":"t","source":"a.txt"}`), cwd); err == nil ||
 			!strings.Contains(err.Error(), "absolute path") {
 			t.Fatalf("cwd %q: %v", cwd, err)
 		}
 	}
-	if got, err := bindTransferPaths("transfer.offer", json.RawMessage(`{"target":"t","source":"/a.txt"}`), ""); err != nil || string(got) != `{"target":"t","source":"/a.txt"}` {
+	if got, err := mcp.BindTransferPaths("transfer.offer", json.RawMessage(`{"target":"t","source":"/a.txt"}`), ""); err != nil || string(got) != `{"target":"t","source":"/a.txt"}` {
 		t.Fatalf("absolute path without cwd = %s, %v", got, err)
 	}
 }

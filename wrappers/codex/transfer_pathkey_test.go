@@ -16,6 +16,7 @@ import (
 
 	kit "github.com/antst/sessionbus/bus/sdk/go"
 	"github.com/antst/sessionbus/bus/sdk/go/protocol"
+	"github.com/sessionbus/peer-common/mcp"
 )
 
 // recordingTransferExecutor records the path the SDK opens at prepare and
@@ -68,13 +69,13 @@ func TestBindTransferPathsRefusesAnotherSpellingOfAPathKey(t *testing.T) {
 		{"transfer.accept", `{"id":"x","destinatioN":"a.txt"}`},
 	} {
 		for _, cwd := range []string{"/thread/work", ""} {
-			if out, err := bindTransferPaths(test.action, json.RawMessage(test.args), cwd); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			if out, err := mcp.BindTransferPaths(test.action, json.RawMessage(test.args), cwd); err == nil || !strings.Contains(err.Error(), "unknown field") {
 				t.Fatalf("%s %s (cwd %q) = %s, %v", test.action, test.args, cwd, out, err)
 			}
 		}
 	}
 	// The documented spelling is bound as before.
-	out, err := bindTransferPaths("transfer.offer", json.RawMessage(`{"target":"t","source":"a.txt"}`), "/thread/work")
+	out, err := mcp.BindTransferPaths("transfer.offer", json.RawMessage(`{"target":"t","source":"a.txt"}`), "/thread/work")
 	if err != nil || string(out) != `{"source":"/thread/work/a.txt","target":"t"}` {
 		t.Fatalf("canonical offer = %s, %v", out, err)
 	}
